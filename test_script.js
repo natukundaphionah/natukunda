@@ -1,43 +1,69 @@
-const { ethers } = require("hardhat");
 const { expect } = require("chai");
+const { ethers } = require("hardhat");
+const fs = require("fs");
+const path = require("path");
 
-describe("Lock contract", function () {
-  let owner, otherAccount;
-  let lock;
-  let unlockTime; // Define unlockTime here
-  const ONE_YEAR_IN_SECS = 365 * 24 * 60 * 60; // Define ONE_YEAR_IN_SECS outside
+// Load the ABI from the JSON file
+const tokenBuyerABI = JSON.parse(fs.readFileSync(path.join(__dirname, '../artifacts/contracts/contract.sol/TokenBuyer.json'))).abi;
+
+describe("TokenBuyer Contract", function () {
+  this.timeout(60000);
+  let TokenBuyer, tokenBuyer, owner, addr1;
+  let token, uniswapRouter;
 
   beforeEach(async function () {
-    const Lock = await ethers.getContractFactory("Lock");
+    [owner, addr1] = await ethers.getSigners();
 
-    // Get the current block timestamp
-    unlockTime = (await ethers.provider.getBlock("latest")).timestamp + ONE_YEAR_IN_SECS;
-    const lockedAmount = ethers.utils.parseEther("1");
+    // Mock Uniswap Router
+    const UniswapRouterMock = await ethers.getContractFactory("UniswapV2RouterMock");
+    uniswapRouter = await UniswapRouterMock.deploy();
+    await uniswapRouter.deployed();
 
-    [owner, otherAccount] = await ethers.getSigners();
-    lock = await Lock.deploy(unlockTime, { value: lockedAmount });
-    await lock.deployed();
+    // Mock Token
+    const TokenMock = await ethers.getContractFactory("ERC20Mock");
+    token = await TokenMock.deploy("MockToken", "MTK", ethers.utils.parseEther("1000"));
+    await token.deployed();
+
+    // Deploy TokenBuyer contract
+    TokenBuyer = await ethers.getContractFactory("TokenBuyer");
+    tokenBuyer = await TokenBuyer.deploy(uniswapRouter.address, token.address);
+    await tokenBuyer.deployed();
   });
 
-  it("Should set the right unlockTime", async function () {
-    const storedUnlockTime = await lock.unlockTime();
-    expect(storedUnlockTime).to.equal(unlockTime);
+  describe("Deployment", function () {
+    it("Should set the correct owner", async function () {
+      expect(await tokenBuyer.owner()).to.equal(owner.address);
+    });
   });
 
-  it("Should set the right owner", async function () {
-    const contractOwner = await lock.owner();
-    expect(contractOwner).to.equal(owner.address);
+  describe("Buy and Withdraw Tokens", function () {
+    it("Should buy tokens and withdraw them to owner", async function () {
+      const initialOwnerBalance = await token.balanceOf(owner.address);
+
+      // Simulate buying tokens
+      await tokenBuyer.connect(owner).buyToken(0, Math.floor(Date.now() / 1000) + 60, { value: ethers.utils.parseEther("1") });
+
+      // Check contract balance
+      expect(await token.balanceOf(tokenBuyer.address)).to.be.gt(0);
+
+      // Withdraw tokens
+      await tokenBuyer.connect(owner).withdrawTokens();
+
+      // Check the owner's token balance
+      expect(await token.balanceOf(owner.address)).to.be.gt(initialOwnerBalance);
+    });
   });
 
-  it("Should receive and store the funds to lock", async function () {
-    const contractBalance = await ethers.provider.getBalance(lock.address);
-    expect(contractBalance).to.equal(lockedAmount);
-  });
+  describe("Withdraw ETH", function () {
+    it("Should withdraw all ETH to the owner", async function () {
+      await owner.sendTransaction({ to: tokenBuyer.address, value: ethers.utils.parseEther("1") });
 
-  it("Should fail if the unlockTime is not in the future", async function () {
-    const Lock = await ethers.getContractFactory("Lock");
-    await expect(
-      Lock.deploy((await ethers.provider.getBlock("latest")).timestamp - ONE_YEAR_IN_SECS, { value: lockedAmount })
-    ).to.be.revertedWith("Unlock time should be in the future");
+      const initialOwnerEthBalance = await ethers.provider.getBalance(owner.address);
+
+      await tokenBuyer.connect(owner).withdrawETH();
+
+      const finalOwnerEthBalance = await ethers.provider.getBalance(owner.address);
+      expect(finalOwnerEthBalance).to.be.gt(initialOwnerEthBalance);
+    });
   });
 });
