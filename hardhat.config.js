@@ -19,10 +19,10 @@ module.exports = {
     hardhat: {
       chainId: 1337,
     },
-    anvil: {
-      url: "http://localhost:8545",
-      accounts: [`0x${PRIVATE_KEY}`],
-    },
+    // anvil: {
+    //   url: "http://localhost:8545",
+    //   accounts: [`0x${PRIVATE_KEY}`],
+    // },
     bscTestnet: {
       url: `https://data-seed-prebsc-1-s1.binance.org:8545`, // Binance Smart Chain Testnet URL
       accounts: [`0x${PRIVATE_KEY}`],
